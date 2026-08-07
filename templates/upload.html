@@ -12,6 +12,7 @@
       <h1>🎓 Nova aula</h1>
       <a class="sair" href="{{ url_for('logout') }}">sair</a>
     </div>
+    <p class="subtitle"><a href="{{ url_for('historico') }}">📚 ver histórico de aulas</a></p>
     <p class="subtitle">Envie o áudio da aula gravada e receba um PDF com resumo.</p>
     {% with messages = get_flashed_messages() %}
       {% if messages %}

@@ -1,8 +1,10 @@
 import os
 import io
+import json
 import uuid
 import threading
 import tempfile
+from datetime import datetime
 from functools import wraps
 
 from flask import (
@@ -34,6 +36,55 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 JOBS = {}
 
 CHUNK_SECONDS = 10 * 60  # 10 minutos por pedaço, para não estourar limites da API
+
+# ---------------------------------------------------------------
+# Histórico persistente (fica salvo em disco enquanto o serviço não
+# passar por um novo deploy - suficiente para uso pessoal no dia a dia)
+# ---------------------------------------------------------------
+HIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "historico_dados")
+HIST_PDFS_DIR = os.path.join(HIST_DIR, "pdfs")
+HIST_JSON = os.path.join(HIST_DIR, "historico.json")
+hist_lock = threading.Lock()
+
+os.makedirs(HIST_PDFS_DIR, exist_ok=True)
+
+
+def carregar_historico():
+    if not os.path.exists(HIST_JSON):
+        return []
+    try:
+        with open(HIST_JSON, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def salvar_no_historico(hist_id, titulo, pdf_bytes):
+    caminho_pdf = os.path.join(HIST_PDFS_DIR, f"{hist_id}.pdf")
+    with open(caminho_pdf, "wb") as f:
+        f.write(pdf_bytes)
+
+    entrada = {
+        "id": hist_id,
+        "titulo": titulo,
+        "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    with hist_lock:
+        lista = carregar_historico()
+        lista.append(entrada)
+        with open(HIST_JSON, "w", encoding="utf-8") as f:
+            json.dump(lista, f, ensure_ascii=False, indent=2)
+
+
+def remover_do_historico(hist_id):
+    with hist_lock:
+        lista = carregar_historico()
+        lista = [item for item in lista if item["id"] != hist_id]
+        with open(HIST_JSON, "w", encoding="utf-8") as f:
+            json.dump(lista, f, ensure_ascii=False, indent=2)
+    caminho_pdf = os.path.join(HIST_PDFS_DIR, f"{hist_id}.pdf")
+    if os.path.exists(caminho_pdf):
+        os.remove(caminho_pdf)
 
 
 # ---------------------------------------------------------------
@@ -233,6 +284,7 @@ def process_job(job_id, caminho_audio, titulo):
         JOBS[job_id]["pdf_bytes"] = pdf_bytes
         JOBS[job_id]["filename"] = f"{titulo}.pdf".replace(" ", "_")
         JOBS[job_id]["status"] = "done"
+        salvar_no_historico(job_id, titulo, pdf_bytes)
     except Exception as e:
         JOBS[job_id]["status"] = "error"
         JOBS[job_id]["error"] = str(e)
@@ -273,6 +325,35 @@ def download(job_id):
         as_attachment=True,
         download_name=job["filename"] or "aula.pdf",
     )
+
+
+# ---------------------------------------------------------------
+# Histórico
+# ---------------------------------------------------------------
+@app.route("/historico")
+@login_required
+def historico():
+    lista = sorted(carregar_historico(), key=lambda x: x["data"], reverse=True)
+    return render_template("historico.html", aulas=lista)
+
+
+@app.route("/historico/download/<hist_id>")
+@login_required
+def historico_download(hist_id):
+    caminho_pdf = os.path.join(HIST_PDFS_DIR, f"{hist_id}.pdf")
+    if not os.path.exists(caminho_pdf):
+        return "PDF não encontrado no histórico.", 404
+    lista = carregar_historico()
+    entrada = next((item for item in lista if item["id"] == hist_id), None)
+    nome_arquivo = f"{entrada['titulo']}.pdf".replace(" ", "_") if entrada else "aula.pdf"
+    return send_file(caminho_pdf, mimetype="application/pdf", as_attachment=True, download_name=nome_arquivo)
+
+
+@app.route("/historico/excluir/<hist_id>", methods=["POST"])
+@login_required
+def historico_excluir(hist_id):
+    remover_do_historico(hist_id)
+    return redirect(url_for("historico"))
 
 
 if __name__ == "__main__":

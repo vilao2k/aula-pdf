@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Histórico - Aulas em PDF</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="card wide">
+    <div class="topo">
+      <h1>📚 Histórico de aulas</h1>
+      <a class="sair" href="{{ url_for('logout') }}">sair</a>
+    </div>
+    <p class="subtitle"><a href="{{ url_for('upload') }}">&larr; enviar nova aula</a></p>
+
+    {% if aulas %}
+      <ul class="lista-historico">
+        {% for aula in aulas %}
+          <li>
+            <div class="info">
+              <strong>{{ aula.titulo }}</strong>
+              <span class="data">{{ aula.data }}</span>
+            </div>
+            <div class="acoes">
+              <a class="botao-pequeno" href="{{ url_for('historico_download', hist_id=aula.id) }}">Baixar PDF</a>
+              <form method="post" action="{{ url_for('historico_excluir', hist_id=aula.id) }}"
+                    onsubmit="return confirm('Excluir esta aula do histórico?');">
+                <button type="submit" class="botao-perigo">Excluir</button>
+              </form>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="subtitle">Nenhuma aula processada ainda.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

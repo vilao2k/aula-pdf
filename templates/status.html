@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Processando... - Aulas em PDF</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="card">
+    <h1>⏳ Processando</h1>
+    <p class="subtitle" id="mensagem">Transcrevendo e gerando o resumo da aula. Isso pode levar alguns minutos, dependendo da duração...</p>
+    <div class="spinner"></div>
+    <p><a id="voltar" href="{{ url_for('upload') }}" style="display:none;">Enviar outra aula</a></p>
+  </div>
+
+  <script>
+    const jobId = "{{ job_id }}";
+    async function checar() {
+      const res = await fetch(`/api/status/${jobId}`);
+      const data = await res.json();
+      if (data.status === "done") {
+        window.location.href = `/download/${jobId}`;
+        document.getElementById("mensagem").innerText = "Pronto! Baixando o PDF...";
+        document.getElementById("voltar").style.display = "inline";
+      } else if (data.status === "error") {
+        document.getElementById("mensagem").innerText = "Ocorreu um erro: " + data.error;
+        document.getElementById("voltar").style.display = "inline";
+      } else {
+        setTimeout(checar, 4000);
+      }
+    }
+    checar();
+  </script>
+</body>
+</html>

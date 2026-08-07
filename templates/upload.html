@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nova aula - Aulas em PDF</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="card">
+    <div class="topo">
+      <h1>🎓 Nova aula</h1>
+      <a class="sair" href="{{ url_for('logout') }}">sair</a>
+    </div>
+    <p class="subtitle">Envie o áudio da aula gravada e receba um PDF com resumo.</p>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="erro">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
+    <form method="post" action="{{ url_for('start_job') }}" enctype="multipart/form-data">
+      <input type="text" name="titulo" placeholder="Título da aula (ex: Cardiologia - Aula 3)" required>
+      <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav" required>
+      <button type="submit">Enviar e transcrever</button>
+    </form>
+    <p class="dica">Dica: grave com o app Memorandos (Voice Memos) do iPhone e depois envie o arquivo aqui.
+    Aulas longas podem levar alguns minutos para processar.</p>
+  </div>
+</body>
+</html>

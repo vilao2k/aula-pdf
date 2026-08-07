@@ -9,8 +9,9 @@ from flask import (
     Flask, request, redirect, url_for, session,
     render_template, send_file, jsonify, flash
 )
+import shutil
+import subprocess
 from groq import Groq
-from pydub import AudioSegment
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
@@ -32,7 +33,7 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 # Jobs em memória: job_id -> dict(status, error, pdf_bytes, filename)
 JOBS = {}
 
-CHUNK_MS = 10 * 60 * 1000  # 10 minutos por pedaço, para não estourar limites da API
+CHUNK_SECONDS = 10 * 60  # 10 minutos por pedaço, para não estourar limites da API
 
 
 # ---------------------------------------------------------------
@@ -102,25 +103,56 @@ def start_job():
 # ---------------------------------------------------------------
 # Processamento em background
 # ---------------------------------------------------------------
-def transcrever_audio(caminho_audio):
-    """Divide o áudio em pedaços e transcreve cada um via Groq Whisper."""
-    audio = AudioSegment.from_file(caminho_audio)
-    duracao_ms = len(audio)
-    partes = []
+def cortar_audio_em_pedacos(caminho_audio, pasta_saida):
+    """
+    Usa o ffmpeg para cortar o áudio em pedaços de CHUNK_SECONDS, escrevendo
+    direto em disco (segment muxer). O ffmpeg processa em streaming, então
+    isso NÃO carrega o áudio inteiro na memória do servidor - importante
+    para aulas longas (1h30+) rodarem bem em servidores com pouca RAM.
+    """
+    padrao_saida = os.path.join(pasta_saida, "pedaco_%04d.mp3")
+    comando = [
+        "ffmpeg", "-y",
+        "-i", caminho_audio,
+        "-vn",                 # ignora qualquer trilha de vídeo, só áudio
+        "-ac", "1",            # mono - suficiente para voz e reduz tamanho
+        "-ar", "16000",        # 16kHz - taxa recomendada para transcrição
+        "-b:a", "64k",
+        "-f", "segment",
+        "-segment_time", str(CHUNK_SECONDS),
+        "-reset_timestamps", "1",
+        padrao_saida,
+    ]
+    resultado = subprocess.run(comando, capture_output=True, text=True)
+    if resultado.returncode != 0:
+        raise RuntimeError(f"Falha ao cortar áudio com ffmpeg: {resultado.stderr[-2000:]}")
 
-    for inicio in range(0, duracao_ms, CHUNK_MS):
-        pedaco = audio[inicio:inicio + CHUNK_MS]
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-            pedaco.export(tmp.name, format="mp3", bitrate="64k")
-            with open(tmp.name, "rb") as f:
+    arquivos = sorted(
+        f for f in os.listdir(pasta_saida) if f.startswith("pedaco_") and f.endswith(".mp3")
+    )
+    if not arquivos:
+        raise RuntimeError("ffmpeg não gerou nenhum pedaço de áudio - verifique o arquivo enviado.")
+    return [os.path.join(pasta_saida, f) for f in arquivos]
+
+
+def transcrever_audio(caminho_audio):
+    """Corta o áudio em pedaços (via ffmpeg, em disco) e transcreve cada um via Groq Whisper."""
+    pasta_pedacos = tempfile.mkdtemp(prefix="pedacos_")
+    partes = []
+    try:
+        caminhos_pedacos = cortar_audio_em_pedacos(caminho_audio, pasta_pedacos)
+        for caminho_pedaco in caminhos_pedacos:
+            with open(caminho_pedaco, "rb") as f:
                 resultado = client.audio.transcriptions.create(
-                    file=(os.path.basename(tmp.name), f.read()),
+                    file=(os.path.basename(caminho_pedaco), f.read()),
                     model="whisper-large-v3-turbo",
                     language="pt",
                     response_format="text",
                 )
             partes.append(str(resultado))
-        os.remove(tmp.name)
+            os.remove(caminho_pedaco)  # libera espaço em disco assim que processa
+    finally:
+        shutil.rmtree(pasta_pedacos, ignore_errors=True)
 
     return "\n".join(partes)
 
